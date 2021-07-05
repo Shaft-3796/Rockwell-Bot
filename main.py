@@ -5,16 +5,19 @@ from discord.ext import tasks
 import discord
 from github import Github
 import datetime
+from webserver import keep_alive
 
 # Ini
 intents = discord.Intents.all()
-bot = commands.Bot(command_prefix='//', intents=intents, help_command=None)
+bot = commands.Bot(command_prefix='r-', intents=intents, help_command=None)
 data = {}
 config = {}
 alert = {}
 g = Github("GITHUB TOKEN")
-repo = g.get_user().get_repo("REPO NAME")
-
+repo = g.get_user().get_repo("RockwellFiles")
+activity = discord.Activity(type=discord.ActivityType.custom, state="Killing survivors")
+bot.change_presence(activity=activity)
+logId = (855746724148412436, 861537071177138196)
 
 # Functions
 def buildKey(message):
@@ -78,14 +81,32 @@ def parse(toParse):
 
 def checkForContent(message):
     maxSize = int(config[str(message.guild.id) + "config"][2])
-    return len(message.content)>maxSize
+    return len(message.content) > maxSize
+
+#Logs
+async def dispatchLog(log):
+    footer = "logged at : " + str(datetime.datetime.now())
+    embed = discord.Embed(title=" ", color=0xec14f0)
+    embed.set_author(name="Rockwell Logger")
+    embed.add_field(name="Log",
+                    value=log,
+                    inline=True)
+    embed.set_footer(text=footer)
+    guild = bot.get_guild(logId[0])
+    for channel in guild.channels:
+        if channel.id == logId[1]:
+            chan = channel
+            break
+    await chan.send(embed=embed)
+
+
 
 
 # Events
 @bot.event
 async def on_ready():
     # Broadcast
-    print("Rockwell came back to life !")
+    print("Rockwell came back to life !!")
 
     # Data & config file assert
     createFiles("data.json", "{}")
@@ -116,73 +137,85 @@ async def on_ready():
             config[str(guild.id) + "config"] = ["7", "24", "1000"]
     await updateFiles()
 
+    await dispatchLog("Rockwell Ready")
+
 
 @bot.event
 async def on_message(message):
-    if message.author.bot:
-        return
-    if message.author.guild_permissions.administrator:
-        await bot.process_commands(message)
+    # IF NOT BOT
+    if not message.author.bot:
+        # IF NOT ADMINISTRATOR
+        if not message.author.guild_permissions.administrator:
 
-    # Ini
-    guildId = str(message.guild.id)
-    channelId = str(message.channel.id)
-    msgTime = int(round(time.time()))
-    key = buildKey(message)
+            # Ini
+            guildId = str(message.guild.id)
+            channelId = str(message.channel.id)
+            msgTime = int(round(time.time()))
+            key = buildKey(message)
 
-    """
-    MESSAGE TIMER
-    """
-    if key in data:
-        nextAllowedTime = int(data[key]) + (3600 * int(config[str(message.guild.id) + "config"][1]))
-        if nextAllowedTime > msgTime and not message.author.guild_permissions.administrator:
-            await message.delete()
-            footer = "Prochain message autorisé : " + str(datetime.datetime.fromtimestamp(nextAllowedTime))
-            embed = discord.Embed(title=" ", color=0xec14f0)
-            embed.set_author(name="Rockwell")
-            embed.add_field(name="Vous ne pouvez pas poster de message !",
-                            value="Vous devez attendre avant de poster un message à nouveau !",
-                            inline=True)
-            embed.set_footer(text=footer)
-            await message.author.send(embed=embed)
-            return
-        else:
-            if checkForContent(message):
+            if not channelId in config[guildId]:
+                return
+
+            # IF KEY EXIST
+            if key in data:
+                # IF USER CAN'T SEND
+                nextAllowedTime = int(data[key]) + (3600 * int(config[str(message.guild.id) + "config"][1]))
+                if nextAllowedTime > msgTime and not message.author.guild_permissions.administrator:
+                    """
+                    CASE 1 USER CAN'T SEND
+                    """
+                    await message.delete()
+                    footer = "Prochain message autorisé : " + str(datetime.datetime.fromtimestamp(nextAllowedTime))
+                    embed = discord.Embed(title=" ", color=0xec14f0)
+                    embed.set_author(name="Rockwell")
+                    embed.add_field(name="Vous ne pouvez pas poster de message !",
+                                    value="Vous devez attendre avant de poster un message à nouveau !",
+                                    inline=True)
+                    embed.set_footer(text=footer)
+                    await message.author.send(embed=embed)
+                    await dispatchLog("Deleted message of " + message.author.name + " in " + message.guild.name + " reason : too early")
+                    return
+
+            # IF MESSAGE IS TOO LONG
+            elif checkForContent(message):
+                """
+                CASE 2 MESSAGE TOO LONG
+                """
                 await message.delete()
-                val = "Votre message a excédé la limite de " + config[str(message.guild.id) + "config"][2] + " caractères !"
+                val = "Votre message a excédé la limite de " + config[str(message.guild.id) + "config"][
+                    2] + " caractères ! Il vous sera renvoyé !"
                 embed = discord.Embed(title=" ", color=0xec14f0)
                 embed.set_author(name="Rockwell")
                 embed.add_field(name="Message supprimé !",
                                 value=val,
                                 inline=True)
                 await message.author.send(embed=embed)
+
+                await send(message.author, message.content)
+                await dispatchLog("Deleted message of " + message.author.name + " in " + message.guild.name + " reason : too long")
                 return
+
+            """
+            CASE 3 PERFORMED
+            """
+
+            # DELETE ALL
+            if str(message.channel.id) in config[guildId] and not message.author.guild_permissions.administrator:
+                first = 0
+                async for msg in message.channel.history(limit=200):
+                    if msg.author == message.author:
+                        if first > 0:
+                            await msg.delete()
+                        first += 1
+
+            # update
             data[key] = str(msgTime)
-    elif channelId in config[guildId]:
-        if checkForContent(message):
-            await message.delete()
-            val = "Votre message a excédé la limite de " + config[str(message.guild.id) + "config"][2] + " caractères !"
-            embed = discord.Embed(title=" ", color=0xec14f0)
-            embed.set_author(name="Rockwell")
-            embed.add_field(name="Message supprimé !",
-                            value=val,
-                            inline=True)
-            await message.author.send(embed=embed)
-            return
-        data[key] = str(msgTime)
+            await updateFiles()
+            await dispatchLog("Performed message of " + message.author.name + " in " + message.guild.name)
 
-        await updateFiles()
 
-    """
-    DELETE AFTER
-    """
-    if str(message.channel.id) in config[guildId] and not message.author.guild_permissions.administrator:
-        first = 0
-        async for msg in message.channel.history(limit=200):
-            if msg.author == message.author:
-                if first > 0:
-                    await msg.delete()
-                first += 1
+        else:
+            await bot.process_commands(message)
 
 
 # Commands
@@ -196,6 +229,7 @@ async def add(ctx, *args):
                         inline=True)
         embed.set_footer(text="//add [channel-id]")
         await ctx.send(embed=embed)
+        await dispatchLog("Error in command add of " + ctx.message.author.name + " in " + ctx.guild.name + " reason : no id")
         return
 
     cn = parse(args[0])
@@ -210,6 +244,7 @@ async def add(ctx, *args):
                                 value="Le channel " + channelName + " existe déjà dans la liste des channels protégés !",
                                 inline=True)
                 await ctx.send(embed=embed)
+                await dispatchLog("Error in command add of " + ctx.message.author.name + " in " + ctx.guild.name + " reason : channel already in")
                 return
             config[str(ctx.guild.id)].append(cn)
             await updateFiles()
@@ -221,6 +256,7 @@ async def add(ctx, *args):
                             value="Le channel " + channelName + " a été ajouté dans la liste des channels protégés !",
                             inline=True)
             await ctx.send(embed=embed)
+            await dispatchLog("Performed command add of " + ctx.message.author.name + " in " + ctx.guild.name)
             return
     embed = discord.Embed(title=" ", color=0xec14f0)
     embed.set_author(name="Rockwell")
@@ -228,6 +264,7 @@ async def add(ctx, *args):
                     value="Le channel n'existe pas !",
                     inline=True)
     await ctx.send(embed=embed)
+    await dispatchLog("Error in command add of " + ctx.message.author.name + " in " + ctx.guild.name + " reason : channel doesn't exist")
 
 
 @bot.command()
@@ -240,6 +277,7 @@ async def remove(ctx, *args):
                         inline=True)
         embed.set_footer(text="//remove [channel-id]")
         await ctx.send(embed=embed)
+        await dispatchLog("Error in command remove of " + ctx.message.author.name + " in " + ctx.guild.name + " reason : no id")
         return
 
     cn = parse(args[0])
@@ -254,6 +292,7 @@ async def remove(ctx, *args):
                                 value="Le channel " + channelName + " n'est déjà pas dans la liste des channels protégés !",
                                 inline=True)
                 await ctx.send(embed=embed)
+                await dispatchLog("Error in command remove of " + ctx.message.author.name + " in " + ctx.guild.name + " reason : channel already not in")
                 return
             config[str(ctx.guild.id)].remove(cn)
             await updateFiles()
@@ -265,6 +304,7 @@ async def remove(ctx, *args):
                             value="Le channel " + channelName + " a été supprimé dans la liste des channels protégés !",
                             inline=True)
             await ctx.send(embed=embed)
+            await dispatchLog("Performed command remove of " + ctx.message.author.name + " in " + ctx.guild.name)
             return
     embed = discord.Embed(title=" ", color=0xec14f0)
     embed.set_author(name="Rockwell")
@@ -272,6 +312,7 @@ async def remove(ctx, *args):
                     value="Le channel n'existe pas !",
                     inline=True)
     await ctx.send(embed=embed)
+    await dispatchLog("Error in command remove of " + ctx.message.author.name + " in " + ctx.guild.name + " reason : channel doesn't exist")
 
 
 @bot.command()
@@ -299,7 +340,9 @@ async def info(ctx):
     if not modified:
         users = "Vous n'avez pas d'utilisateurs alertés "
 
-    configuration = "Alert : " + config[str(ctx.guild.id) + "config"][0] + " jours.\n" + "Message : " + config[str(ctx.guild.id) + "config"][1] + " heures.\n" + "Size : " + config[str(ctx.guild.id) + "config"][2] + " caractères."
+    configuration = "Alert : " + config[str(ctx.guild.id) + "config"][0] + " jours.\n" + "Message : " + \
+                    config[str(ctx.guild.id) + "config"][1] + " heures.\n" + "Size : " + \
+                    config[str(ctx.guild.id) + "config"][2] + " caractères."
 
     embed = discord.Embed(title=" ", color=0xec14f0)
     embed.set_author(name="Rockwell")
@@ -317,6 +360,7 @@ async def info(ctx):
                     inline=False)
     embed.set_footer(text="contact : Shaft#3796")
     await ctx.send(embed=embed)
+    await dispatchLog("Performed command info of " + ctx.message.author.name + " in " + ctx.guild.name)
 
 
 @bot.command()
@@ -330,7 +374,7 @@ async def help(ctx):
                     value="Ajoute un channel à la liste des channels protégés, Exemple : //add 854633053078159389 ou //add #général",
                     inline=False)
     embed.add_field(name="//remove [channel-id]",
-                    value="Supprime un channel de la liste des channels protégés, Exemple : //remove 854633053078159389 ou //remove @Shaft",
+                    value="Supprime un channel de la liste des channels protégés, Exemple : //remove 854633053078159389 ou //remove #général",
                     inline=False)
     embed.add_field(name="//alert [user-id] [date (optional)]",
                     value="Setup l'alerte automatique d'un joueur pour le renouvellement de son VIP, vous devez entrer l'identifiant ou le nom précèdé d'un @ de l'utilisateur ainsi que la date si vous le souhaitez après votre commande ! Si vous n'indiquez pas de date, cette dernière sera fixée à 30 jours à partir du moment ou vous utiliserez la commande, la date doit etre donnée en unix epoch time, le convertisseur est disponible ici : https://www.epochconverter.com/ pour plus de détails me contacter : Shaft#3796",
@@ -343,6 +387,7 @@ async def help(ctx):
                     inline=False)
     embed.set_footer(text="contact : Shaft#3796")
     await ctx.send(embed=embed)
+    await dispatchLog("Performed command help of " + ctx.message.author.name + " in " + ctx.guild.name)
 
 
 @bot.command()
@@ -356,6 +401,7 @@ async def alert(ctx, *args):
                         inline=True)
         embed.set_footer(text="//alert [user-id] [date]")
         await ctx.send(embed=embed)
+        await dispatchLog("Error in command alert of " + ctx.message.author.name + " in " + ctx.guild.name + " reason : no args")
         return
 
     un = parse(args[0])
@@ -378,13 +424,15 @@ async def alert(ctx, *args):
             alert[str(user.id)] = str(t)
             await updateFiles()
 
-            val = "L'utilisateur " + user.name + " va recevoir ses alertes, la prochaine aura lieu " + config[str(ctx.guild.id) + "config"][0] + " jours avant le " + str(datetime.datetime.fromtimestamp(t))
+            val = "L'utilisateur " + user.name + " va recevoir ses alertes, la prochaine aura lieu " + \
+                  config[str(ctx.guild.id) + "config"][0] + " jours avant le " + str(datetime.datetime.fromtimestamp(t))
             embed = discord.Embed(title=" ", color=0xec14f0)
             embed.set_author(name="Rockwell")
             embed.add_field(name="Commande exécutée",
                             value=val,
                             inline=True)
             await ctx.send(embed=embed)
+            await dispatchLog("Performed command alert of " + ctx.message.author.name + " in " + ctx.guild.name)
             return
         else:
             val = "L'utilisateur " + user.name + " reçoit déjà des alertes !"
@@ -394,6 +442,7 @@ async def alert(ctx, *args):
                             value=val,
                             inline=True)
             await ctx.send(embed=embed)
+            await dispatchLog("Error in command alert of " + ctx.message.author.name + " in " + ctx.guild.name + " reason : user already recieve alerts")
             return
 
     else:
@@ -403,6 +452,7 @@ async def alert(ctx, *args):
                         value="L'utilisateur n'existe pas !",
                         inline=True)
         await ctx.send(embed=embed)
+        await dispatchLog("Error in command alert of " + ctx.message.author.name + " in " + ctx.guild.name + " reason : user doesn't exist")
 
 
 @bot.command()
@@ -416,6 +466,7 @@ async def calm(ctx, *args):
                         inline=True)
         embed.set_footer(text="//calm [user-id]")
         await ctx.send(embed=embed)
+        await dispatchLog("Error in command calm of " + ctx.message.author.name + " in " + ctx.guild.name + " reason : no args")
         return
 
     un = parse(args[0])
@@ -438,6 +489,7 @@ async def calm(ctx, *args):
                             value=val,
                             inline=True)
             await ctx.send(embed=embed)
+            await dispatchLog("Performed command calm of " + ctx.message.author.name + " in " + ctx.guild.name)
             return
         else:
             val = "L'utilisateur " + user.name + " ne reçoit pas d'alertes !"
@@ -447,6 +499,7 @@ async def calm(ctx, *args):
                             value=val,
                             inline=True)
             await ctx.send(embed=embed)
+            await dispatchLog("Error in command calm of " + ctx.message.author.name + " in " + ctx.guild.name + " reason : user doesn't recieve alerts")
             return
 
     else:
@@ -456,6 +509,7 @@ async def calm(ctx, *args):
                         value="L'utilisateur n'existe pas !",
                         inline=True)
         await ctx.send(embed=embed)
+        await dispatchLog("Error in command calm of " + ctx.message.author.name + " in " + ctx.guild.name + " reason : user doesn't exist")
 
 
 @bot.command()
@@ -469,6 +523,7 @@ async def config(ctx, *args):
                         inline=True)
         embed.set_footer(text="//config [config-line] [value]")
         await ctx.send(embed=embed)
+        await dispatchLog("error in command config of " + ctx.message.author.name + " in " + ctx.guild.name + " reason : miss args")
         return
 
     if args[0] == "alert":
@@ -482,6 +537,7 @@ async def config(ctx, *args):
                             inline=True)
             embed.set_footer(text="//config [config-line] [value]")
             await ctx.send(embed=embed)
+            await dispatchLog("error in command config of " + ctx.message.author.name + " in " + ctx.guild.name + " with object : alert" + " reason : arg not int")
             return
         config[str(ctx.guild.id) + "config"][0] = str(value)
         msg = "Les vip seront alertés " + str(value) + " jours avant l'expiration de leurs grades"
@@ -491,6 +547,7 @@ async def config(ctx, *args):
                         value=msg,
                         inline=True)
         await ctx.send(embed=embed)
+        await dispatchLog("Performed command config of " + ctx.message.author.name + " in " + ctx.guild.name + " with object : alert")
 
 
     elif args[0] == "message":
@@ -504,6 +561,7 @@ async def config(ctx, *args):
                             inline=True)
             embed.set_footer(text="//config [config-line] [value]")
             await ctx.send(embed=embed)
+            await dispatchLog("error in command config of " + ctx.message.author.name + " in " + ctx.guild.name + " with object : message" + " reason : arg not int")
             return
         config[str(ctx.guild.id) + "config"][1] = str(value)
         msg = "Les utilisateurs pourront poster des messages toute les " + str(value) + " heures par channels protégés"
@@ -513,6 +571,7 @@ async def config(ctx, *args):
                         value=msg,
                         inline=True)
         await ctx.send(embed=embed)
+        await dispatchLog("Performed command config of " + ctx.message.author.name + " in " + ctx.guild.name + " with object : message")
 
     elif args[0] == "size":
         try:
@@ -525,6 +584,7 @@ async def config(ctx, *args):
                             inline=True)
             embed.set_footer(text="//config [config-line] [value]")
             await ctx.send(embed=embed)
+            await dispatchLog("error in command config of " + ctx.message.author.name + " in " + ctx.guild.name + " with object : size" + " reason : arg not int")
             return
         config[str(ctx.guild.id) + "config"][2] = str(value)
         msg = "Les utilisateurs aurront une limite de " + str(
@@ -535,6 +595,7 @@ async def config(ctx, *args):
                         value=msg,
                         inline=True)
         await ctx.send(embed=embed)
+        await dispatchLog("Performed command config of " + ctx.message.author.name + " in " + ctx.guild.name + " with object : size")
 
     else:
         embed = discord.Embed(title=" ", color=0xec14f0)
@@ -544,8 +605,10 @@ async def config(ctx, *args):
                         inline=True)
         embed.set_footer(text="//config [config-line] [value]")
         await ctx.send(embed=embed)
+        await dispatchLog("error in command config of " + ctx.message.author.name + " in " + ctx.guild.name + " reason : wrong config line")
 
     await updateFiles()
+
 
 # TASK
 
@@ -563,15 +626,18 @@ async def myLoop():
                     embed = discord.Embed(title=" ", color=0xec14f0)
                     embed.set_author(name="Rockwell")
                     embed.add_field(name="Bonjour à toi !",
-                                    value="Ton Vip va expirer dans moins de " + config[str(guild.id) + "config"][0] + " ! Pense à le renouveler et merci de ton soutien aux serveurs !",
+                                    value="Ton Vip va expirer dans moins de " + config[str(guild.id) + "config"][
+                                        0] + " ! Pense à le renouveler et merci de ton soutien aux serveurs !",
                                     inline=True)
                     try:
                         await user.send(embed=embed)
                     except:
                         pass
+                    await dispatchLog("Alerted " + user.name)
 
 
 myLoop.start()
 
+keep_alive()
 # Run
 bot.run("TOKEN")
