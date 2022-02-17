@@ -1,2 +1,2 @@
 # Rockwell-Bot
-Discord bot for Inx ark servers
+A discord bot to handle discord channels regulation & to handle subscriptions renewal
